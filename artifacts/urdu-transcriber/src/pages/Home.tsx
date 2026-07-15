@@ -41,14 +41,19 @@ export default function Home() {
 
   const handleFile = async (selectedFile: File) => {
     if (!selectedFile) return;
-    const allowed = ["audio/ogg", "audio/mpeg", "audio/mp3", "audio/mp4", "audio/x-m4a", "audio/wav", "audio/webm", "audio/aac", "audio/opus"];
+    // Extension is the primary gate: files shared from WhatsApp and other
+    // mobile apps often arrive with a missing or generic browser-reported
+    // MIME type, so relying on `selectedFile.type` alone would wrongly
+    // reject valid audio. This list matches the audio formats Groq's
+    // transcription API supports.
+    const allowedExts = ['mp3', 'mpga', 'mpeg', 'mp4', 'm4a', 'wav', 'ogg', 'opus', 'webm', 'aac', 'flac'];
+    const allowed = ["audio/ogg", "audio/mpeg", "audio/mp3", "audio/mpga", "audio/mp4", "audio/x-m4a", "audio/wav", "audio/webm", "audio/aac", "audio/opus", "audio/flac", "audio/x-flac"];
     const ext = selectedFile.name.split('.').pop()?.toLowerCase();
-    const allowedExts = ['ogg', 'mp3', 'm4a', 'wav', 'opus', 'aac'];
-    
-    if (!allowed.includes(selectedFile.type) && !allowedExts.includes(ext || '')) {
+
+    if (!allowedExts.includes(ext || '') && !allowed.includes(selectedFile.type)) {
       toast({
         title: "File type support nahi karta",
-        description: "Barae meherbani .mp3, .wav, .m4a, ya .ogg upload karein.",
+        description: "Barae meherbani .mp3, .wav, .m4a, .ogg, .mpga/.mpeg, .mp4, .opus, .webm, ya .flac upload karein.",
         variant: "destructive"
       });
       return;
@@ -187,13 +192,13 @@ export default function Home() {
                 </div>
                 <div>
                   <p className="text-base font-medium text-white mb-1">Click karein ya file yahan drag karein</p>
-                  <p className="text-sm text-muted-foreground">.mp3, .ogg, .m4a, .wav (size ki koi limit nahi)</p>
+                  <p className="text-sm text-muted-foreground">.mp3, .mpga, .mpeg, .mp4, .m4a, .wav, .ogg, .opus, .webm, .flac (size ki koi limit nahi)</p>
                 </div>
                 <input 
                   type="file" 
                   ref={fileInputRef} 
                   className="hidden" 
-                  accept="audio/*,.m4a,.opus"
+                  accept="audio/*,.mp3,.mpga,.mpeg,.mp4,.m4a,.wav,.ogg,.opus,.webm,.aac,.flac"
                   onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
                 />
               </div>
