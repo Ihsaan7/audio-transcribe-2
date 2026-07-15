@@ -1,10 +1,18 @@
 import { useState, useRef } from "react";
 import { Upload, FileAudio, Check, Copy, Download, Play, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
-import { getAudioDuration, processAndTranscribe } from "@/lib/audioPipeline";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { getAudioDuration, getEstimatedChunkCount, processAndTranscribe } from "@/lib/audioPipeline";
 import { useToast } from "@/components/ui/use-toast";
 
 export default function Home() {
@@ -18,6 +26,8 @@ export default function Home() {
   const [progressPercent, setProgressPercent] = useState(0);
   const [transcript, setTranscript] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [showFilenameDialog, setShowFilenameDialog] = useState(false);
+  const [filenameInput, setFilenameInput] = useState("");
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -52,11 +62,7 @@ export default function Home() {
     
     const d = await getAudioDuration(selectedFile);
     setDuration(d);
-    if (d > 0) {
-      setEstimatedChunks(Math.ceil(d / 600)); // 10 min chunks
-    } else {
-      setEstimatedChunks(1);
-    }
+    setEstimatedChunks(getEstimatedChunkCount(d));
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -106,9 +112,21 @@ export default function Home() {
     });
   };
 
-  const downloadTxt = () => {
+  const defaultTranscriptFilename = () => {
     const baseName = file?.name.replace(/\.[^/.]+$/, "") || "audio";
-    const filename = `${baseName}_transcript.txt`;
+    return `${baseName}_transcript.txt`;
+  };
+
+  const openDownloadDialog = () => {
+    setFilenameInput(defaultTranscriptFilename());
+    setShowFilenameDialog(true);
+  };
+
+  const confirmDownloadTxt = () => {
+    let filename = filenameInput.trim() || defaultTranscriptFilename();
+    if (!/\.txt$/i.test(filename)) {
+      filename = `${filename}.txt`;
+    }
     const blob = new Blob([transcript], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -118,6 +136,7 @@ export default function Home() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    setShowFilenameDialog(false);
   };
 
   const formatSize = (bytes: number) => {
@@ -261,7 +280,7 @@ export default function Home() {
                   <Button variant="secondary" size="sm" onClick={copyToClipboard}>
                     <Copy className="w-4 h-4 mr-2" /> Copy
                   </Button>
-                  <Button variant="default" size="sm" onClick={downloadTxt}>
+                  <Button variant="default" size="sm" onClick={openDownloadDialog}>
                     <Download className="w-4 h-4 mr-2" /> Download .txt
                   </Button>
                 </div>
@@ -292,6 +311,34 @@ export default function Home() {
         )}
         
       </div>
+
+      <Dialog open={showFilenameDialog} onOpenChange={setShowFilenameDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Transcript ka naam</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={filenameInput}
+            onChange={(e) => setFilenameInput(e.target.value)}
+            placeholder={defaultTranscriptFilename()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                confirmDownloadTxt();
+              }
+            }}
+            autoFocus
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowFilenameDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmDownloadTxt}>
+              <Download className="w-4 h-4 mr-2" /> Download
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

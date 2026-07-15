@@ -1,5 +1,30 @@
 import { loadLameJS } from "./lamejs";
 
+// At 64kbps mono the encoder produces ~8KB/sec (~480KB/min), so a 20 minute
+// chunk is ~9.6MB -- comfortably under Groq's 25MB per-file limit with a
+// large safety margin. Files at or under this length are sent as a single
+// chunk instead of being split unnecessarily.
+const MAX_CHUNK_DURATION_SEC = 20 * 60;
+
+/**
+ * Picks a chunk duration based on the total audio length: short files are
+ * sent as one chunk, longer files are split into ~20 minute chunks so fewer,
+ * larger requests are made instead of many small ones, while staying safely
+ * under Groq's size limit.
+ */
+export function getChunkDurationSec(totalDurationSec: number): number {
+  if (totalDurationSec <= MAX_CHUNK_DURATION_SEC) {
+    return totalDurationSec;
+  }
+  return MAX_CHUNK_DURATION_SEC;
+}
+
+export function getEstimatedChunkCount(totalDurationSec: number): number {
+  if (totalDurationSec <= 0) return 1;
+  const chunkDuration = getChunkDurationSec(totalDurationSec);
+  return Math.max(1, Math.ceil(totalDurationSec / chunkDuration));
+}
+
 export async function processAndTranscribe(
   file: File,
   onProgress: (message: string, percent: number) => void,
@@ -46,7 +71,7 @@ export async function processAndTranscribe(
 
     const chunks: Blob[] = [];
     const SAMPLE_RATE = 16000;
-    const CHUNK_DURATION_SEC = 600; // 10 minutes
+    const CHUNK_DURATION_SEC = getChunkDurationSec(audioBuffer.duration);
     const SAMPLES_PER_CHUNK = SAMPLE_RATE * CHUNK_DURATION_SEC;
     const totalChunks = Math.ceil(int16Data.length / SAMPLES_PER_CHUNK);
     
