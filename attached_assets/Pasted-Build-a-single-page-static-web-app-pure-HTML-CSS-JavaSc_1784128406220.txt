@@ -1,0 +1,43 @@
+Build a single-page static web app (pure HTML/CSS/JavaScript, no backend, no frameworks) called "Urdu Lecture Transcriber" for transcribing long Urdu audio lectures using the Groq Whisper API.
+Core functionality:
+
+File upload: Big drag-and-drop zone + "Choose File" button. Accept any audio format: .ogg, .mp3, .m4a, .wav, .opus, .aac. Show file name and size after selection.
+Audio processing (all in browser):
+
+Decode the uploaded audio using Web Audio API (AudioContext.decodeAudioData) — this handles ogg/opus/m4a natively in Chrome
+Automatically split audio into 10-minute chunks
+Re-encode each chunk to MP3 using the lamejs library (load from CDN: https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js)
+Encode at 64kbps mono 16kHz to keep each chunk under Groq's 25MB limit
+
+
+Transcription:
+
+Send each chunk one by one to Groq API endpoint: POST https://api.groq.com/openai/v1/audio/transcriptions
+Use multipart/form-data with: file (the mp3 chunk), model: "whisper-large-v3", language: "ur", response_format: "text"
+Authorization header: "Bearer " + API key
+API key: stored in a password-type input field at the top of the page, saved to localStorage so user only enters it once
+Show progress: "Part 2 of 6 transcribing..." with a progress bar
+If a chunk fails, retry it up to 2 times before showing an error, and continue with remaining chunks
+
+
+Output:
+
+Combine all chunk transcripts in order, separated by "--- حصہ 1 ---", "--- حصہ 2 ---" etc.
+Show the full Urdu transcript in a large textarea (RTL direction, right-aligned, Urdu-friendly font like Noto Nastaliq Urdu from Google Fonts)
+Two buttons: "Copy Transcript" and "Download as .txt" (filename = original audio filename + "_transcript.txt", UTF-8 encoding)
+
+
+
+UI requirements:
+
+Clean, modern, mobile-friendly design — dark theme with emerald green accents
+Big obvious steps: 1. Enter API key → 2. Upload audio → 3. Click "Transcribe" → 4. Download
+Status messages in simple language (mix of English/Roman Urdu is fine, e.g. "Transcription shuru ho rahi hai...")
+Everything must work as a static site on a Chromebook browser — no server, no Python, no installation
+
+Important technical notes:
+
+Use only vanilla JavaScript, single index.html file preferred (inline CSS/JS is fine)
+Chunking must handle long files (1+ hour lectures) without freezing the browser — use async processing with small delays between chunks
+Handle decodeAudioData failures gracefully with a clear error message
+Show estimated chunks count immediately after file selection
