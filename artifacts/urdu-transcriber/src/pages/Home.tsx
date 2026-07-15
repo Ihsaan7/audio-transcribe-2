@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import { Upload, FileAudio, Check, Copy, Download, Play, Loader2, AlertCircle } from "lucide-react";
+import { useTheme } from "next-themes";
+import { Upload, FileAudio, Check, Copy, Download, Play, Loader2, AlertCircle, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +17,7 @@ import { getAudioDuration, getEstimatedChunkCount, processAndTranscribe } from "
 import { useToast } from "@/components/ui/use-toast";
 
 export default function Home() {
+  const { theme, setTheme } = useTheme();
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [estimatedChunks, setEstimatedChunks] = useState<number | null>(null);
@@ -159,12 +161,23 @@ export default function Home() {
       <div className="max-w-3xl mx-auto px-4 py-12 flex flex-col gap-8">
         
         <header className="flex flex-col gap-3">
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white flex items-center gap-3">
-            <div className="bg-primary/20 p-2 rounded-lg text-primary">
-              <FileAudio className="w-8 h-8" />
-            </div>
-            Urdu Lecture Transcriber
-          </h1>
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg text-primary">
+                <FileAudio className="w-8 h-8" />
+              </div>
+              Urdu Lecture Transcriber
+            </h1>
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0 rounded-full"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label="Theme tabdeel karein"
+            >
+              {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </Button>
+          </div>
           <p className="text-muted-foreground text-lg leading-relaxed">
             Lambe audio bayanaat aur lectures ko baghair kisi rukaawat ke transcribe karein. Yeh app directly aapke browser mein chalti hai, isliye file ka size koi masla nahi.
           </p>
@@ -174,7 +187,7 @@ export default function Home() {
         <Card className="border-muted bg-card/50 overflow-hidden">
           <div className="bg-muted/30 border-b border-muted px-6 py-3 flex items-center gap-3">
             <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm font-medium">1</span>
-            <h2 className="font-semibold text-white">Audio File Muntekhib Karein</h2>
+            <h2 className="font-semibold text-foreground">Audio File Muntekhib Karein</h2>
           </div>
           <CardContent className="p-6">
             {!file ? (
@@ -191,7 +204,7 @@ export default function Home() {
                   <Upload className="w-8 h-8 text-muted-foreground" />
                 </div>
                 <div>
-                  <p className="text-base font-medium text-white mb-1">Click karein ya file yahan drag karein</p>
+                  <p className="text-base font-medium text-foreground mb-1">Click karein ya file yahan drag karein</p>
                   <p className="text-sm text-muted-foreground">.mp3, .mpga, .mpeg, .mp4, .m4a, .wav, .ogg, .opus, .webm, .flac (size ki koi limit nahi)</p>
                 </div>
                 <input 
@@ -210,7 +223,7 @@ export default function Home() {
                       <FileAudio className="w-6 h-6" />
                     </div>
                     <div>
-                      <p className="font-medium text-white truncate max-w-[200px] sm:max-w-xs">{file.name}</p>
+                      <p className="font-medium text-foreground truncate max-w-[200px] sm:max-w-xs">{file.name}</p>
                       <div className="flex items-center gap-3 text-sm text-muted-foreground mt-0.5">
                         <span>{formatSize(file.size)}</span>
                         {duration !== null && (
@@ -228,7 +241,7 @@ export default function Home() {
                 {estimatedChunks !== null && (
                   <div className="text-sm text-muted-foreground flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 text-primary" />
-                    Yeh file takreeban <strong className="text-white">{estimatedChunks} hisson</strong> mein taqseem ho kar process hogi, taake browser hang na ho.
+                    Yeh file takreeban <strong className="text-foreground">{estimatedChunks} hisson</strong> mein taqseem ho kar process hogi, taake browser hang na ho.
                   </div>
                 )}
               </div>
@@ -277,7 +290,7 @@ export default function Home() {
             <div className="bg-muted/30 border-b border-muted px-6 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm font-medium">3</span>
-                <h2 className="font-semibold text-white">Nateeja (Transcript)</h2>
+                <h2 className="font-semibold text-foreground">Nateeja (Transcript)</h2>
               </div>
               
               {status === "done" && (
