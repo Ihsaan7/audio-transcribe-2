@@ -1,7 +1,6 @@
-import { useState, useRef, useEffect } from "react";
-import { Upload, FileAudio, Check, Copy, Download, Play, Key, Loader2, AlertCircle } from "lucide-react";
+import { useState, useRef } from "react";
+import { Upload, FileAudio, Check, Copy, Download, Play, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,7 +8,6 @@ import { getAudioDuration, processAndTranscribe } from "@/lib/audioPipeline";
 import { useToast } from "@/components/ui/use-toast";
 
 export default function Home() {
-  const [apiKey, setApiKey] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [estimatedChunks, setEstimatedChunks] = useState<number | null>(null);
@@ -23,16 +21,6 @@ export default function Home() {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-
-  useEffect(() => {
-    const stored = localStorage.getItem("groq_api_key");
-    if (stored) setApiKey(stored);
-  }, []);
-
-  const handleKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setApiKey(e.target.value);
-    localStorage.setItem("groq_api_key", e.target.value);
-  };
 
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -80,14 +68,6 @@ export default function Home() {
   };
 
   const startTranscription = async () => {
-    if (!apiKey) {
-      toast({
-        title: "API Key zaruri hai",
-        description: "Shuru karne se pehle apni Groq API key darj karein.",
-        variant: "destructive"
-      });
-      return;
-    }
     if (!file) return;
 
     setStatus("processing");
@@ -99,7 +79,6 @@ export default function Home() {
 
     await processAndTranscribe(
       file,
-      apiKey,
       (msg, pct) => {
         setProgressMsg(msg);
         setProgressPercent(pct);
@@ -167,33 +146,10 @@ export default function Home() {
           </p>
         </header>
 
-        {/* Step 1: API Key */}
+        {/* Step 1: Audio Upload */}
         <Card className="border-muted bg-card/50 overflow-hidden">
           <div className="bg-muted/30 border-b border-muted px-6 py-3 flex items-center gap-3">
             <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm font-medium">1</span>
-            <h2 className="font-semibold text-white">Groq API Key</h2>
-          </div>
-          <CardContent className="p-6">
-            <div className="relative max-w-md">
-              <Key className="absolute left-3 top-2.5 h-5 w-5 text-muted-foreground" />
-              <Input 
-                type="password" 
-                placeholder="gsk_..." 
-                className="pl-10 font-mono"
-                value={apiKey}
-                onChange={handleKeyChange}
-              />
-            </div>
-            <p className="text-sm text-muted-foreground mt-3">
-              Yeh key sirf aapke browser (localStorage) mein mehfooz rehti hai aur directly Groq ke servers se baat karti hai.
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Step 2: Audio Upload */}
-        <Card className={`border-muted bg-card/50 overflow-hidden transition-colors ${!apiKey ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div className="bg-muted/30 border-b border-muted px-6 py-3 flex items-center gap-3">
-            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm font-medium">2</span>
             <h2 className="font-semibold text-white">Audio File Muntekhib Karein</h2>
           </div>
           <CardContent className="p-6">
@@ -256,7 +212,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Step 3: Action */}
+        {/* Step 2: Action */}
         <div className={`transition-opacity ${!file ? 'opacity-50 pointer-events-none' : ''}`}>
           <div className="flex flex-col items-center justify-center gap-4 py-4">
             {status === "idle" && (
@@ -291,12 +247,12 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Step 4: Output */}
+        {/* Step 3: Output */}
         {(transcript || status === "processing") && (
            <Card className="border-muted bg-card/50 overflow-hidden shadow-lg border-t-2 border-t-primary">
             <div className="bg-muted/30 border-b border-muted px-6 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm font-medium">4</span>
+                <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm font-medium">3</span>
                 <h2 className="font-semibold text-white">Nateeja (Transcript)</h2>
               </div>
               

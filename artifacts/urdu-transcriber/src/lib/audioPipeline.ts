@@ -2,7 +2,6 @@ import { loadLameJS } from "./lamejs";
 
 export async function processAndTranscribe(
   file: File,
-  apiKey: string,
   onProgress: (message: string, percent: number) => void,
   onComplete: (transcript: string) => void,
   onError: (error: string) => void
@@ -101,15 +100,9 @@ export async function processAndTranscribe(
           
           const formData = new FormData();
           formData.append("file", chunkBlob, "audio.mp3");
-          formData.append("model", "whisper-large-v3");
-          formData.append("language", "ur");
-          formData.append("response_format", "text");
           
-          const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+          const res = await fetch("/api/transcribe", {
             method: "POST",
-            headers: {
-              "Authorization": `Bearer ${apiKey}`
-            },
             body: formData
           });
           
