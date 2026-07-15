@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Urdu Lecture Transcriber"
+version = "1.0.0"
+id = "artifacts/urdu-transcriber"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24124
+
+[services.development]
+run = "pnpm --filter @workspace/urdu-transcriber run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/urdu-transcriber", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/urdu-transcriber/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24124"
+BASE_PATH = "/"
