@@ -30,7 +30,7 @@ router.post(
       const forwardForm = new FormData();
       forwardForm.append(
         "file",
-        new Blob([file.buffer], { type: file.mimetype || "audio/mp3" }),
+        new Blob([new Uint8Array(file.buffer)], { type: file.mimetype || "audio/mp3" }),
         file.originalname || "audio.mp3",
       );
       forwardForm.append("model", "whisper-large-v3");
