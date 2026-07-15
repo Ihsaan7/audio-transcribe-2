@@ -5,15 +5,20 @@ import { defineConfig } from 'vite';
 
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
+// On Replit, this app runs behind a path-based proxy that assigns a port and
+// a base path via env vars. Outside Replit (e.g. building for Vercel, or
+// running `vite build`/`vite dev` locally), those env vars won't be set, so
+// fall back to sane defaults instead of failing the build.
+const isReplit = process.env.REPL_ID !== undefined;
 const rawPort = process.env.PORT;
 
-if (!rawPort) {
+if (isReplit && !rawPort) {
   throw new Error(
     'PORT environment variable is required but was not provided.',
   );
 }
 
-const port = Number(rawPort);
+const port = Number(rawPort || 5173);
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -21,14 +26,14 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH;
 
-if (!basePath) {
+if (isReplit && !basePath) {
   throw new Error(
     'BASE_PATH environment variable is required but was not provided.',
   );
 }
 
 export default defineConfig({
-  base: basePath,
+  base: basePath || '/',
   plugins: [
     react(),
     tailwindcss(),
