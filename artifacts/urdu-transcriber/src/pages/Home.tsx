@@ -1,6 +1,5 @@
 import { useState, useRef } from "react";
-import { useTheme } from "next-themes";
-import { Upload, FileAudio, Check, Copy, Download, Play, Loader2, AlertCircle, Sun, Moon } from "lucide-react";
+import { Upload, FileAudio, Copy, Download, Play, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,7 +16,6 @@ import { getAudioDuration, getEstimatedChunkCount, processAndTranscribe } from "
 import { useToast } from "@/components/ui/use-toast";
 
 export default function Home() {
-  const { theme, setTheme } = useTheme();
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [estimatedChunks, setEstimatedChunks] = useState<number | null>(null);
@@ -157,28 +155,15 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-[100dvh] w-full bg-background text-foreground selection:bg-primary/30">
-      <div className="max-w-3xl mx-auto px-4 py-12 flex flex-col gap-8">
-        
-        <header className="flex flex-col gap-3">
-          <div className="flex items-start justify-between gap-4">
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground flex items-center gap-3">
-              <div className="bg-primary/20 p-2 rounded-lg text-primary">
-                <FileAudio className="w-8 h-8" />
-              </div>
-              Urdu Lecture Transcriber
-            </h1>
-            <Button
-              variant="outline"
-              size="icon"
-              className="shrink-0 rounded-full"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              aria-label="Theme tabdeel karein"
-            >
-              {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </Button>
-          </div>
-          <p className="text-muted-foreground text-lg leading-relaxed">
+    <>
+      <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-8">
+
+        <header className="flex flex-col gap-2">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
+            <FileAudio className="w-7 h-7 text-primary" />
+            Transcriber
+          </h1>
+          <p className="text-muted-foreground leading-relaxed">
             Lambe audio bayanaat aur lectures ko baghair kisi rukaawat ke transcribe karein. Yeh app directly aapke browser mein chalti hai, isliye file ka size koi masla nahi.
           </p>
         </header>
@@ -357,6 +342,6 @@ export default function Home() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

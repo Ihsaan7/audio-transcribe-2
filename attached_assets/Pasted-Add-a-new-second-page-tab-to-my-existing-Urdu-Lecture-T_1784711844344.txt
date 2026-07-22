@@ -1,0 +1,194 @@
+Add a new second page/tab to my existing Urdu Lecture Transcriber web app called "Transcript to PDF". Keep the existing transcriber page working as-is; just add navigation between the two pages (Tab 1: "Transcriber", Tab 2: "Transcript to PDF").
+
+This new page takes a transcribed Urdu tafseer lecture and generates a fully-styled RTL Urdu PDF using Google Gemini API. Everything runs client-side, no backend.
+
+Page 2 UI Layout (top to bottom)
+Gemini API Key input (password field) — labeled "Gemini API Key" — saved to localStorage separately from Groq key
+Lesson metadata fields in a row (all optional, will appear on the PDF cover):
+Surah name (default: سورۃ البقرہ)
+Para number in Urdu (default: تیسرا پارہ)
+Lesson number in Urdu (default: ۱)
+Ayaat range (e.g. ۲۵۳ تا ۲۵۷)
+Speaker name (default: مفتی فیض الرحمٰن سید)
+Institute name (default: مرکز الفیصل اسلامک انسٹیٹیوٹ (رجسٹرڈ))
+Topics list (multiline textarea — one topic per line, in Urdu)
+Large textarea — labeled "Paste transcript here" — RTL, Nastaliq font
+"Generate PDF" button — big, prominent, emerald
+Status area — shows: "Sending to Gemini..." / "Structuring content..." / "Building PDF..." / "Done!"
+HTML preview iframe — shows the generated document before download
+"Download PDF" button — appears after generation
+Processing Pipeline
+Step 1: Send transcript to Gemini API
+
+Endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent?key=API_KEY
+
+Method: POST with JSON body
+
+Send this exact system prompt + transcript + metadata:
+
+You are an Islamic tafseer lecture formatter. You will receive a raw Urdu speech-to-text transcript of a Quran tafseer lecture along with lesson metadata.
+
+Your job: Clean up the transcript (fix speech-to-text errors, remove filler phrases, correct broken sentences without changing meaning) and structure the ENTIRE content into a JSON object matching the exact schema below. Do NOT summarize — include ALL points from the transcript in order.
+
+Respond with valid JSON only. No markdown fences, no preamble, no explanation.
+
+JSON SCHEMA:
+{
+  "cover_title": "short 2-line Urdu title describing the lesson's main themes",
+  "topics_summary": ["short Urdu topic 1", "short Urdu topic 2", "..."] // 5-10 items for the cover page
+  "sections": [
+    {
+      "heading": "section heading in Urdu (main topic)",
+      "blocks": [
+        // Each block is one of these types — include as many as needed in the right order:
+        { "type": "body", "text": "explanation paragraph in clean Urdu" },
+        { "type": "quran", "arabic": "Arabic ayah text with harakat", "ref": "Surah name: verse number (in Urdu)", "translation": "Urdu translation" },
+        { "type": "hadith", "arabic": "Arabic hadith text", "ref": "source reference in Urdu (e.g. 'صحیح بخاری')", "translation": "Urdu translation" },
+        { "type": "scholar", "name": "scholar name in Urdu (e.g. 'امام قرطبی رحمۃ اللہ علیہ')", "text": "their statement/quote in Urdu", "arabic": "optional Arabic text if present, else empty string" },
+        { "type": "narrative", "label": "brief Urdu label (e.g. 'شانِ نزول', 'واقعہ')", "text": "the story/incident in Urdu" },
+        { "type": "info", "label": "brief Urdu label (e.g. 'لغوی وضاحت', 'اہم نکتہ')", "text": "the info in Urdu" },
+        { "type": "fiqh", "label": "brief Urdu label (e.g. 'فقہی احکام')", "items": ["item 1", "item 2", "..."] },
+        { "type": "caution", "label": "brief Urdu label (e.g. 'خبردار', 'آج کا المیہ')", "text": "warning/caution text in Urdu" },
+        { "type": "subheading", "text": "sub-heading text in Urdu" }
+      ]
+    }
+  ],
+  "fawaid": ["numbered benefit 1 in Urdu", "numbered benefit 2 in Urdu", "..."], // 8-15 key takeaways collected from entire lecture
+  "conclusion_dua": "Arabic dua text if mentioned at end, else empty string"
+}
+
+RULES:
+- Keep all Urdu text in proper Urdu script (Nastaliq-appropriate)
+- Keep all Arabic text (ayaat, ahadith, duas, scholar quotes) in proper Arabic script with harakat
+- Do NOT translate Arabic to Urdu when the original is Arabic — preserve both
+- Extract as many sections as exist in the transcript in the correct order
+- Each section can have multiple blocks — use the block types that fit the content
+- If the transcript mentions an ayah, always create a "quran" block with all 3 fields
+- If the transcript mentions a hadith, always create a "hadith" block
+- fiqh items and fawaid should be complete sentences, not fragments
+- If a field's content doesn't exist, use empty string "" (never null)
+- Response must be a single valid JSON object — no markdown, no code fences
+
+Send the user's metadata + transcript in the user message part:
+
+LESSON METADATA:
+- Surah: [surah field]
+- Para: [para field]
+- Lesson: [lesson field]
+- Ayaat: [ayaat field]
+- Speaker: [speaker field]
+- Institute: [institute field]
+- Provided topics list: [topics field, joined with newlines]
+
+TRANSCRIPT:
+[full transcript here]
+Step 2: Parse the JSON response
+Strip any markdown code fences (json or ) before parsing
+Use JSON.parse() in try/catch
+On parse error, show raw response in an error box for debugging
+On success, proceed to build HTML
+Step 3: Build the styled HTML
+
+Load these fonts from Google Fonts CDN in a <link> inside the generated HTML:
+
+Noto Nastaliq Urdu — for all Urdu text
+Amiri — for all Arabic text
+
+Root styles:
+
+direction: rtl
+Background: 
+#fdf6e3 (cream)
+Body text color: 
+#2c1a0e
+Font: Noto Nastaliq Urdu, 15.5px, line-height 2.3
+
+Cover page (first, page-break-after: always, full A4):
+
+Deep gradient background — rotate through these themes based on lesson number (so consecutive lessons look different):
+Themes array: ['#0a1f1a→#0d3d30', '#080820→#10205a', '#2a0a0a→#6b1a20', '#1f1000→#5a3208', '#1f0813→#5c1230', '#0d141c→#26384c', '#081a10→#153524']
+Pick one based on (lessonNumber % themes.length) or randomly
+Centered content: Bismillah (Amiri, 34px, gold-ish), institute name, course line, para badge, large lesson number, "سبق نمبر" label, ayaat range, cover title, surah name, topics list (from topics_summary or user-provided topics), speaker at bottom
+18px inset decorative border
+
+Content pages — for each section in sections[]:
+
+Start each section with a page break OR continue on same page if it fits (use CSS page-break-inside: avoid on section wrapper).
+
+Render heading as a big styled bar:
+
+background: linear-gradient(to left, #d0f0e0, #b0e8d0, #d0f0e0);
+border-right: 5px solid #0d6b4a;
+font-size: 18.5px; font-weight: bold;
+padding: 10px 16px; text-align: center;
+
+For each block in blocks[], render the appropriate styled box:
+
+Block type	Style
+body	Plain paragraph, justified, 15.5px, line-height 2.6, no box
+quran	Green gradient box (#e8f5e9→#c8e6c9), 2px green border, 6px right border. Arabic 20px Amiri centered, ref italic small, translation below
+hadith	Purple gradient box (#ede7f6→#d1c4e9), 2px purple border. Same structure
+scholar	Amber gradient box (#fff8e1→#ffecb3). Name bold on top, Arabic centered if present, then text
+narrative	Orange gradient box (#fff3e0→#ffe0b2). Label bold, then text
+info	Cyan gradient box (#e0f7fa→#b2ebf2). Label bold, then text
+fiqh	Purple gradient box (#f3e5f5→#e1bee7). Label bold, items as list with dotted separator
+caution	Pink gradient box (#fce4ec→#f8bbd9). Label bold, then text
+subheading	Small heading with right border, no box
+
+All boxes: padding: 14-16px, margin: 15-18px 0, border-radius: 5-6px, right border 5-6px thick.
+
+Final page:
+
+Blue Fawaid box (#e3f2fd→#bbdefb, 2px blue border) with heading "فوائد و مستنبطات" — list all items from fawaid[] with numbered Amiri-font counters
+Dark gradient conclusion box (matching cover gradient) — if conclusion_dua not empty, show it in Amiri font centered
+
+Page headers/footers on each content page (not cover):
+
+Header: section title left, "پارہ X — سبق Y" badge right, 2px bottom border
+Footer: institute name + lesson info
+
+Each page: width: 210mm; min-height: 297mm; padding: 18mm 16mm 16mm 16mm; page-break-after: always;
+
+Step 4: Convert HTML to PDF
+
+Use html2pdf.js from CDN: https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js
+
+javascript
+const filename = `Takhassus_Para${paraField}_Lesson${lessonField}_${surahShort}.pdf`;
+html2pdf().set({
+  margin: 0,
+  filename: filename,
+  image: { type: 'jpeg', quality: 0.98 },
+  html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+  jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+  pagebreak: { mode: ['css', 'legacy'] }
+}).from(htmlElement).save();
+
+Important: Wait for fonts to load before rendering PDF:
+
+javascript
+await document.fonts.ready;
+Design (main app UI, not the PDF)
+Dark theme: background 
+#1a1a2e, cards 
+#16213e, accent emerald 
+#10b981
+Tab navigation at top (two tabs)
+Both tabs share the dark theme
+Mobile-friendly, all inputs full-width on small screens
+Loading spinner during Gemini call
+Error messages in red boxes with clear text
+All labels in a mix of English/Roman Urdu (e.g. "Gemini API Key", "Transcript paste karein")
+Error Handling
+Invalid Gemini API key → clear message "API key ghalat hai — nayi key generate karein"
+Rate limit hit → "Rate limit exceeded — thoda ruk kar try karein"
+JSON parse fail → show raw Gemini response in scrollable box, message "Gemini ne invalid response bheja, dobara try karein"
+Empty transcript → "Transcript khali hai"
+Network error → "Network problem — check karein"
+Additional Requirements
+Single index.html for the second page (inline CSS/JS is fine)
+OR add it as a new route/tab in the existing app — your call, whichever is cleaner
+The Gemini model to use: gemini-3-flash (latest stable free-tier model as of 2026)
+API keys stored separately in localStorage: groq_api_key and gemini_api_key
+Show a note under the API key field: "Free tier: 1,500 requests/day — https://aistudio.google.com/apikey"
+Preserve the transcript in the textarea after generating (in case user wants to regenerate with adjustments)
