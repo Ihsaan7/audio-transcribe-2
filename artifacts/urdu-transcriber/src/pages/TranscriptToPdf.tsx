@@ -433,7 +433,7 @@ ${transcript}`;
     let rawText = "";
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent?key=${encodeURIComponent(apiKey.trim())}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey.trim())}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
