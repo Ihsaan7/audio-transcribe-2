@@ -512,12 +512,34 @@ ${transcript}`;
     // Parse JSON
     let parsed: GeminiResponse;
     try {
-      const cleaned = rawText
+      // Strip optional markdown code-fence wrapper
+      const stripped = rawText
         .replace(/^```json\s*/i, "")
         .replace(/^```\s*/i, "")
         .replace(/```\s*$/i, "")
         .trim();
-      parsed = JSON.parse(cleaned) as GeminiResponse;
+
+      // Extract the first balanced {...} block — Gemini sometimes appends
+      // stray text or duplicate fragments after the closing brace.
+      const extractJson = (s: string): string => {
+        const start = s.indexOf("{");
+        if (start === -1) return s;
+        let depth = 0;
+        let inStr = false;
+        let escape = false;
+        for (let i = start; i < s.length; i++) {
+          const ch = s[i];
+          if (escape) { escape = false; continue; }
+          if (ch === "\\" && inStr) { escape = true; continue; }
+          if (ch === '"') { inStr = !inStr; continue; }
+          if (inStr) continue;
+          if (ch === "{") depth++;
+          else if (ch === "}") { depth--; if (depth === 0) return s.slice(start, i + 1); }
+        }
+        return s; // fallback: return as-is and let JSON.parse surface the real error
+      };
+
+      parsed = JSON.parse(extractJson(stripped)) as GeminiResponse;
     } catch {
       setStatus("error");
       setErrorMsg("Gemini ne invalid response bheja — dobara try karein");
