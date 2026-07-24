@@ -361,21 +361,14 @@ ${buildPdfBody(data, meta, gradient)}
 </html>`;
 }
 
-// ─── Model config (change here if Google retires a model) ────────────────────
-
-const GEMINI_MODEL = "gemini-2.5-flash";
-
-const MODELS = [
-  { value: "gemini-2.5-flash",        label: "Gemini 2.5 Flash (recommended)" },
-  { value: "gemini-2.5-flash-lite",   label: "Gemini 2.5 Flash Lite (fast)" },
-  { value: "gemini-2.5-pro",          label: "Gemini 2.5 Pro (high quality)" },
-] as const;
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function TranscriptToPdf() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("gemini_api_key") ?? "");
-  const [model, setModel] = useState(() => localStorage.getItem("gemini_model") ?? GEMINI_MODEL);
+  const [model, setModel] = useState(() => localStorage.getItem("gemini_model") ?? "");
+  const [availableModels, setAvailableModels] = useState<{ value: string; label: string }[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState("");
   const [meta, setMeta] = useState<Metadata>({
     surah: "سورۃ البقرہ",
     para: "تیسرا پارہ",
@@ -400,8 +393,42 @@ export default function TranscriptToPdf() {
     if (apiKey) localStorage.setItem("gemini_api_key", apiKey);
   }, [apiKey]);
   useEffect(() => {
-    localStorage.setItem("gemini_model", model);
+    if (model) localStorage.setItem("gemini_model", model);
   }, [model]);
+
+  // Fetch available generateContent models whenever the API key changes
+  useEffect(() => {
+    if (!apiKey.trim()) { setAvailableModels([]); setModelsError(""); return; }
+    const controller = new AbortController();
+    (async () => {
+      setModelsLoading(true);
+      setModelsError("");
+      try {
+        const url = new URL("https://generativelanguage.googleapis.com/v1beta/models");
+        url.searchParams.set("key", apiKey.trim());
+        url.searchParams.set("pageSize", "100");
+        const res = await fetch(url.toString(), { signal: controller.signal });
+        if (!res.ok) { setModelsError("Models load nahi ho sake — API key check karein"); setModelsLoading(false); return; }
+        const data = await res.json() as { models?: { name: string; displayName: string; supportedGenerationMethods?: string[] }[] };
+        const flash = (data.models ?? [])
+          .filter(m => (m.supportedGenerationMethods ?? []).includes("generateContent") && m.name.includes("flash"))
+          .map(m => ({ value: m.name.replace("models/", ""), label: m.displayName ?? m.name.replace("models/", "") }))
+          .sort((a, b) => b.value.localeCompare(a.value));
+        setAvailableModels(flash);
+        // Auto-select: saved model if still available, else first in list
+        setModel(prev => {
+          const saved = localStorage.getItem("gemini_model") ?? "";
+          const stillAvailable = flash.some(m => m.value === saved);
+          return (stillAvailable ? saved : flash[0]?.value) ?? prev;
+        });
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") setModelsError("Models load nahi ho sake");
+      } finally {
+        setModelsLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [apiKey]);
 
   // Push generated HTML into the iframe via ref (avoids srcdoc React re-render issues)
   useEffect(() => {
@@ -623,23 +650,33 @@ ${transcript}`;
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Model</Label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
-            >
-              {MODELS.map((m) => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
+            <Label className="text-xs text-muted-foreground">
+              Model
+              {modelsLoading && <span className="ml-2 text-muted-foreground/60">— load ho raha hai...</span>}
+              {!modelsLoading && availableModels.length > 0 && (
+                <span className="ml-2 text-green-500">— {availableModels.length} models mile</span>
+              )}
+            </Label>
+            {modelsError && (
+              <p className="text-xs text-destructive">{modelsError}</p>
+            )}
+            {availableModels.length > 0 ? (
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+              >
+                {availableModels.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="flex h-9 w-full items-center rounded-md border border-input bg-muted/30 px-3 text-sm text-muted-foreground">
+                {apiKey.trim() ? (modelsLoading ? "Models fetch ho rahe hain..." : "Koi model nahi mila") : "Pehle API key enter karein"}
+              </div>
+            )}
             <p className="text-xs text-muted-foreground leading-relaxed">
-              ⚠️ <strong>Quota project-level hoti hai</strong> — ek project ke andar model change karne se quota reset nahi hoti.
-              Agar "quota" ya "429" error aaye to{" "}
-              <a href="https://aistudio.google.com" target="_blank" rel="noreferrer" className="underline text-primary">
-                AI Studio
-              </a>{" "}
-              mein <strong>naya project banayein</strong>, us project mein nayi key generate karein, aur wohi key yahan paste karein.
+              Yeh list aapki key se real-time fetch hoti hai — sirf woh models dikhte hain jo aapke account mein kaam karte hain.
             </p>
           </div>
         </CardContent>
