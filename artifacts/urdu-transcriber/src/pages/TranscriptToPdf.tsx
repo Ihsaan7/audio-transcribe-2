@@ -364,9 +364,8 @@ ${buildPdfBody(data, meta, gradient)}
 // ─── Component ───────────────────────────────────────────────────────────────
 
 const MODELS = [
-  { value: "gemini-2.0-flash",      label: "Gemini 2.0 Flash (default)" },
-  { value: "gemini-1.5-flash",      label: "Gemini 1.5 Flash (alag quota)" },
-  { value: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite (fastest)" },
+  { value: "gemini-2.0-flash",      label: "Gemini 2.0 Flash (recommended)" },
+  { value: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite (light)" },
   { value: "gemini-2.5-flash",      label: "Gemini 2.5 Flash (latest)" },
 ] as const;
 
@@ -613,7 +612,7 @@ ${transcript}`;
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Model — agar quota limit aaye to doosra model try karein</Label>
+            <Label className="text-xs text-muted-foreground">Model</Label>
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
@@ -623,6 +622,14 @@ ${transcript}`;
                 <option key={m.value} value={m.value}>{m.label}</option>
               ))}
             </select>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              ⚠️ <strong>Quota project-level hoti hai</strong> — ek project ke andar model change karne se quota reset nahi hoti.
+              Agar "quota" ya "429" error aaye to{" "}
+              <a href="https://aistudio.google.com" target="_blank" rel="noreferrer" className="underline text-primary">
+                AI Studio
+              </a>{" "}
+              mein <strong>naya project banayein</strong>, us project mein nayi key generate karein, aur wohi key yahan paste karein.
+            </p>
           </div>
         </CardContent>
       </Card>
