@@ -432,29 +432,32 @@ ${transcript}`;
 
     let rawText = "";
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey.trim())}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-            contents: [{ role: "user", parts: [{ text: userMsg }] }],
-            generationConfig: { responseMimeType: "application/json" },
-          }),
-        },
-      );
+      const url = new URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent");
+      url.searchParams.set("key", apiKey.trim());
+
+      const res = await fetch(url.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [{ role: "user", parts: [{ text: userMsg }] }],
+          generationConfig: { responseMimeType: "application/json" },
+        }),
+      });
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         const msg: string = errData?.error?.message ?? "";
-        if (res.status === 401 || msg.toLowerCase().includes("api key")) {
-          throw new Error("API key ghalat hai — nayi key generate karein");
+        const status = res.status;
+        if (status === 401 || msg.toLowerCase().includes("api key not valid") || msg.toLowerCase().includes("invalid api key")) {
+          throw new Error(`API key ghalat hai (${status}) — Google AI Studio se nayi key banayein`);
         }
-        if (res.status === 429) {
-          throw new Error("Rate limit exceeded — thoda ruk kar try karein");
+        if (status === 429) {
+          // Show the real reason: per-minute limit vs daily quota
+          const reason = msg.toLowerCase().includes("quota") ? "Daily quota khatam ho gayi — kal try karein ya billing add karein" : `Rate limit (${status}): ${msg}`;
+          throw new Error(reason);
         }
-        throw new Error(`Gemini error ${res.status}: ${msg || res.statusText}`);
+        throw new Error(`Gemini error ${status}: ${msg || res.statusText}`);
       }
 
       const json = await res.json();
