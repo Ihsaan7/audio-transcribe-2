@@ -125,28 +125,6 @@ function parseUrduNum(s: string): number {
   return parseInt(ascii, 10) || 0;
 }
 
-function loadHtml2Pdf(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if ((window as any).html2pdf) { resolve(); return; }
-    const script = document.createElement("script");
-    script.src =
-      "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("html2pdf load failed"));
-    document.head.appendChild(script);
-  });
-}
-
-function ensurePdfFonts(): void {
-  if (document.getElementById("pdf-gfonts")) return;
-  const link = document.createElement("link");
-  link.id = "pdf-gfonts";
-  link.rel = "stylesheet";
-  link.href =
-    "https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&family=Amiri:ital,wght@0,400;0,700;1,400&display=swap";
-  document.head.appendChild(link);
-}
-
 // ─── PDF CSS ─────────────────────────────────────────────────────────────────
 
 function buildPdfCss(scope = ""): string {
@@ -386,7 +364,6 @@ export default function TranscriptToPdf() {
   const [generatedHtml, setGeneratedHtml] = useState("");
 
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
-  const pdfRenderRef = useRef<HTMLDivElement>(null);
 
   // Persist API key + model to localStorage
   useEffect(() => {
@@ -482,7 +459,10 @@ ${transcript}`;
         body: JSON.stringify({
           system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: [{ role: "user", parts: [{ text: userMsg }] }],
-          generationConfig: { responseMimeType: "application/json" },
+          generationConfig: {
+            responseMimeType: "application/json",
+            maxOutputTokens: 65536,   // ensure full transcript is covered, not just part 1
+          },
         }),
       });
 
@@ -545,65 +525,32 @@ ${transcript}`;
     setStatusMsg("Tayaar! ✓");
   }
 
-  async function downloadPdf() {
-    if (!generatedHtml || !pdfRenderRef.current) return;
+  function downloadPdf() {
+    if (!generatedHtml) return;
 
     setStatus("building");
-    setStatusMsg("PDF download kar raha hai...");
+    setStatusMsg("PDF print dialog khul raha hai...");
 
     try {
-      // Inject scoped PDF styles into main doc (once)
-      if (!document.getElementById("pdf-scoped-styles")) {
-        const style = document.createElement("style");
-        style.id = "pdf-scoped-styles";
-        style.textContent = buildPdfCss(".pdf-render-scope");
-        document.head.appendChild(style);
+      // Open the self-contained HTML (fonts + styles already embedded) in a new tab
+      // and trigger the browser's native Print → Save as PDF.
+      // This is the only reliable approach for complex RTL/Urdu documents —
+      // html2canvas loses fonts and RTL layout in a cross-document context.
+      const blob = new Blob([generatedHtml], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, "_blank");
+      if (!win) {
+        throw new Error(
+          "Browser ne naya tab block kar diya. Please popup allow karein aur dobara click karein.",
+        );
       }
-
-      // Inject Google Fonts (for html2canvas rendering in main doc context)
-      ensurePdfFonts();
-
-      // Load html2pdf.js
-      await loadHtml2Pdf();
-
-      // Set the hidden div content
-      const lessonNum = parseUrduNum(meta.lesson);
-      const [from, to] = COVER_THEMES[lessonNum % COVER_THEMES.length];
-      const gradient = `linear-gradient(135deg, ${from}, ${to})`;
-      const parsed = JSON.parse(
-        new DOMParser()
-          .parseFromString(generatedHtml, "text/html")
-          .body.innerHTML
-          .match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[0] ?? "{}",
-      );
-
-      // Simpler: just set innerHTML directly from the iframe
-      if (previewIframeRef.current?.contentDocument?.body) {
-        pdfRenderRef.current.innerHTML =
-          previewIframeRef.current.contentDocument.body.innerHTML;
-      }
-
-      // Wait for fonts
-      await new Promise((r) => setTimeout(r, 300));
-      await document.fonts.ready;
-
-      const surahShort = meta.surah.split(" ")[0] ?? "Surah";
-      const filename = `Takhassus_Para${meta.para}_Lesson${meta.lesson}_${surahShort}.pdf`;
-
-      await (window as any)
-        .html2pdf()
-        .set({
-          margin: 0,
-          filename,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-          pagebreak: { mode: ["css", "legacy"] },
-        })
-        .from(pdfRenderRef.current)
-        .save();
-
-      pdfRenderRef.current.innerHTML = "";
+      win.addEventListener("load", () => {
+        // Give fonts ~2 s to download inside the new tab before printing
+        setTimeout(() => {
+          win.print();
+          URL.revokeObjectURL(url);
+        }, 2000);
+      });
     } catch (err) {
       setStatus("error");
       setErrorMsg(`PDF download mein masla: ${(err as Error).message}`);
@@ -611,7 +558,7 @@ ${transcript}`;
     }
 
     setStatus("done");
-    setStatusMsg("Tayaar! ✓");
+    setStatusMsg("Print dialog khul gaya — 'Save as PDF' select karein ✓");
   }
 
   const isLoading = status === "sending" || status === "structuring" || status === "building";
@@ -829,18 +776,6 @@ ${transcript}`;
         </Card>
       )}
 
-      {/* Hidden off-screen div for html2pdf rendering */}
-      <div
-        ref={pdfRenderRef}
-        aria-hidden="true"
-        className="pdf-render-scope"
-        style={{
-          position: "absolute",
-          left: "-9999px",
-          top: 0,
-          width: "210mm",
-        }}
-      />
     </div>
   );
 }
