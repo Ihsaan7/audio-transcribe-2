@@ -363,8 +363,16 @@ ${buildPdfBody(data, meta, gradient)}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+const MODELS = [
+  { value: "gemini-2.0-flash",      label: "Gemini 2.0 Flash (default)" },
+  { value: "gemini-1.5-flash",      label: "Gemini 1.5 Flash (alag quota)" },
+  { value: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite (fastest)" },
+  { value: "gemini-2.5-flash",      label: "Gemini 2.5 Flash (latest)" },
+] as const;
+
 export default function TranscriptToPdf() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("gemini_api_key") ?? "");
+  const [model, setModel] = useState(() => localStorage.getItem("gemini_model") ?? "gemini-2.0-flash");
   const [meta, setMeta] = useState<Metadata>({
     surah: "سورۃ البقرہ",
     para: "تیسرا پارہ",
@@ -384,10 +392,13 @@ export default function TranscriptToPdf() {
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const pdfRenderRef = useRef<HTMLDivElement>(null);
 
-  // Persist API key to localStorage
+  // Persist API key + model to localStorage
   useEffect(() => {
     if (apiKey) localStorage.setItem("gemini_api_key", apiKey);
   }, [apiKey]);
+  useEffect(() => {
+    localStorage.setItem("gemini_model", model);
+  }, [model]);
 
   // Push generated HTML into the iframe via ref (avoids srcdoc React re-render issues)
   useEffect(() => {
@@ -432,7 +443,7 @@ ${transcript}`;
 
     let rawText = "";
     try {
-      const url = new URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent");
+      const url = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`);
       url.searchParams.set("key", apiKey.trim());
 
       const res = await fetch(url.toString(), {
@@ -447,17 +458,10 @@ ${transcript}`;
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        const msg: string = errData?.error?.message ?? "";
+        const msg: string = errData?.error?.message ?? res.statusText;
         const status = res.status;
-        if (status === 401 || msg.toLowerCase().includes("api key not valid") || msg.toLowerCase().includes("invalid api key")) {
-          throw new Error(`API key ghalat hai (${status}) — Google AI Studio se nayi key banayein`);
-        }
-        if (status === 429) {
-          // Show the real reason: per-minute limit vs daily quota
-          const reason = msg.toLowerCase().includes("quota") ? "Daily quota khatam ho gayi — kal try karein ya billing add karein" : `Rate limit (${status}): ${msg}`;
-          throw new Error(reason);
-        }
-        throw new Error(`Gemini error ${status}: ${msg || res.statusText}`);
+        // Always surface the raw Google message so user knows exactly what happened
+        throw new Error(`Gemini error ${status}: ${msg}`);
       }
 
       const json = await res.json();
@@ -584,25 +588,42 @@ ${transcript}`;
           <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm font-medium">1</span>
           <h2 className="font-semibold text-foreground">Gemini API Key</h2>
         </div>
-        <CardContent className="p-6 flex flex-col gap-3">
-          <Input
-            type="password"
-            placeholder="AIza..."
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="font-mono"
-          />
-          <p className="text-xs text-muted-foreground">
-            Free tier: 1,500 requests/day —{" "}
-            <a
-              href="https://aistudio.google.com/apikey"
-              target="_blank"
-              rel="noreferrer"
-              className="underline text-primary"
+        <CardContent className="p-6 flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">API Key</Label>
+            <Input
+              type="password"
+              placeholder="AIza..."
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              className="font-mono"
+            />
+            <p className="text-xs text-muted-foreground">
+              Google AI Studio se banayein —{" "}
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noreferrer"
+                className="underline text-primary"
+              >
+                aistudio.google.com/apikey
+              </a>
+              . Har project ka alag quota hota hai — agar limit aaye to naya project banayein aur us project mein nayi key generate karein.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">Model — agar quota limit aaye to doosra model try karein</Label>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
             >
-              https://aistudio.google.com/apikey
-            </a>
-          </p>
+              {MODELS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
         </CardContent>
       </Card>
 
