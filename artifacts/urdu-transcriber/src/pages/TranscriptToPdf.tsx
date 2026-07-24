@@ -96,7 +96,8 @@ RULES:
 - If the transcript mentions a hadith, always create a "hadith" block
 - fiqh items and fawaid should be complete sentences, not fragments
 - If a field's content doesn't exist, use empty string "" (never null)
-- Response must be a single valid JSON object — no markdown, no code fences`;
+- Response must be a single valid JSON object — no markdown, no code fences
+- Never state a surah name that does not appear in the transcript. Use only the surah explicitly named in the source text. Do not infer or substitute surah names.`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -123,6 +124,17 @@ function parseUrduNum(s: string): number {
     String(d.charCodeAt(0) - 0x06f0),
   );
   return parseInt(ascii, 10) || 0;
+}
+
+function loadHtml2Pdf(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if ((window as any).html2pdf) { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("html2pdf.js load nahi hua"));
+    document.head.appendChild(s);
+  });
 }
 
 // ─── PDF CSS ─────────────────────────────────────────────────────────────────
@@ -154,7 +166,7 @@ ${p}.cover-title { font-size:22px; font-weight:700; line-height:1.7; margin:10px
 ${p}.cover-surah { font-size:26px; font-weight:700; margin-bottom:18px; color:#e8c875; }
 ${p}.cover-topics { list-style:none; text-align:right; font-size:14px; color:rgba(255,255,255,0.8); line-height:2; margin-bottom:24px; padding:0; }
 ${p}.cover-topics li::before { content:"• "; color:rgba(255,255,255,0.5); }
-${p}.cover-speaker { position:absolute; bottom:28mm; right:0; left:0; text-align:center; font-size:15px; color:rgba(255,255,255,0.9); }
+${p}.cover-speaker { margin-top:auto; text-align:center; font-size:15px; color:rgba(255,255,255,0.9); padding-bottom:2mm; }
 
 ${p}.content-header { border-bottom:2px solid #0d6b4a; padding-bottom:8px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; font-size:13px; color:#555; }
 ${p}.content-header-left { font-weight:600; color:#2c1a0e; }
@@ -525,40 +537,86 @@ ${transcript}`;
     setStatusMsg("Tayaar! ✓");
   }
 
-  function downloadPdf() {
+  async function downloadPdf() {
     if (!generatedHtml) return;
 
     setStatus("building");
-    setStatusMsg("PDF print dialog khul raha hai...");
+    setStatusMsg("PDF bana raha hai...");
+
+    const CONTAINER_ID = "pdf-dl-container";
+    let container: HTMLDivElement | null = null;
 
     try {
-      // Open the self-contained HTML (fonts + styles already embedded) in a new tab
-      // and trigger the browser's native Print → Save as PDF.
-      // This is the only reliable approach for complex RTL/Urdu documents —
-      // html2canvas loses fonts and RTL layout in a cross-document context.
-      const blob = new Blob([generatedHtml], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const win = window.open(url, "_blank");
-      if (!win) {
-        throw new Error(
-          "Browser ne naya tab block kar diya. Please popup allow karein aur dobara click karein.",
-        );
-      }
-      win.addEventListener("load", () => {
-        // Give fonts ~2 s to download inside the new tab before printing
-        setTimeout(() => {
-          win.print();
-          URL.revokeObjectURL(url);
-        }, 2000);
+      await loadHtml2Pdf();
+
+      // Parse the self-contained HTML to extract body content + fonts link
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(generatedHtml, "text/html");
+
+      // Inject Google Fonts into main doc so html2canvas can find them
+      doc.querySelectorAll('link[rel="stylesheet"]').forEach((el) => {
+        const href = (el as HTMLLinkElement).href;
+        if (!document.querySelector(`link[href="${href}"]`)) {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = href;
+          document.head.appendChild(link);
+        }
       });
+
+      // Inject scoped PDF styles (scoped to container ID, won't leak into main app)
+      const styleId = "pdf-dl-styles";
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement("style");
+        style.id = styleId;
+        style.textContent = buildPdfCss(`#${CONTAINER_ID}`);
+        document.head.appendChild(style);
+      }
+
+      // Create render container — position:fixed so html2canvas sees real layout;
+      // z-index:-9999 keeps it behind the UI; opacity stays at 1 so canvas renders correctly
+      container = document.createElement("div");
+      container.id = CONTAINER_ID;
+      container.style.cssText =
+        "position:fixed;top:0;left:0;width:794px;z-index:-9999;pointer-events:none;";
+      container.innerHTML = doc.body.innerHTML;
+      document.body.appendChild(container);
+
+      // Wait for fonts to download
+      await new Promise((r) => setTimeout(r, 2500));
+      await document.fonts.ready;
+
+      const surahShort = meta.surah.split(" ")[0] ?? "Surah";
+      const filename = `Sabaq_${meta.lesson}_${surahShort}.pdf`;
+
+      await (window as any)
+        .html2pdf()
+        .set({
+          margin: 0,
+          filename,
+          image: { type: "jpeg", quality: 0.95 },
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+            letterRendering: true,
+            logging: false,
+          },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+          pagebreak: { mode: ["css", "legacy"] },
+        })
+        .from(container)
+        .save();
+
+      setStatus("done");
+      setStatusMsg("PDF download ho gaya ✓");
     } catch (err) {
       setStatus("error");
       setErrorMsg(`PDF download mein masla: ${(err as Error).message}`);
-      return;
+    } finally {
+      if (container && document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
     }
-
-    setStatus("done");
-    setStatusMsg("Print dialog khul gaya — 'Save as PDF' select karein ✓");
   }
 
   const isLoading = status === "sending" || status === "structuring" || status === "building";
