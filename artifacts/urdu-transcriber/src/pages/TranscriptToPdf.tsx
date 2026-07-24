@@ -361,17 +361,21 @@ ${buildPdfBody(data, meta, gradient)}
 </html>`;
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Model config (change here if Google retires a model) ────────────────────
+
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 const MODELS = [
-  { value: "gemini-2.0-flash",      label: "Gemini 2.0 Flash (recommended)" },
-  { value: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite (light)" },
-  { value: "gemini-2.5-flash",      label: "Gemini 2.5 Flash (latest)" },
+  { value: "gemini-2.5-flash",        label: "Gemini 2.5 Flash (recommended)" },
+  { value: "gemini-2.5-flash-lite",   label: "Gemini 2.5 Flash Lite (fast)" },
+  { value: "gemini-2.5-pro",          label: "Gemini 2.5 Pro (high quality)" },
 ] as const;
+
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export default function TranscriptToPdf() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("gemini_api_key") ?? "");
-  const [model, setModel] = useState(() => localStorage.getItem("gemini_model") ?? "gemini-2.0-flash");
+  const [model, setModel] = useState(() => localStorage.getItem("gemini_model") ?? GEMINI_MODEL);
   const [meta, setMeta] = useState<Metadata>({
     surah: "سورۃ البقرہ",
     para: "تیسرا پارہ",
@@ -459,7 +463,14 @@ ${transcript}`;
         const errData = await res.json().catch(() => ({}));
         const msg: string = errData?.error?.message ?? res.statusText;
         const status = res.status;
-        // Always surface the raw Google message so user knows exactly what happened
+        // 404 → model name wrong or retired
+        if (status === 404) {
+          throw new Error(`Model unavailable or retired — check the model name in the dropdown. Google error: ${msg}`);
+        }
+        // 429 with limit:0 → model retired / project has zero quota
+        if (status === 429 && msg.includes("limit: 0")) {
+          throw new Error(`Model unavailable or retired — check the model name in the dropdown. Google error: ${msg}`);
+        }
         throw new Error(`Gemini error ${status}: ${msg}`);
       }
 
