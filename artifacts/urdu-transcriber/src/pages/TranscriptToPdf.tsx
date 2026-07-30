@@ -672,48 +672,37 @@ export default function TranscriptToPdf() {
     setStatus("building");
     setStatusMsg("PDF bana raha hai...");
 
-    const CONTAINER_ID = "pdf-dl-container";
-    let container: HTMLDivElement | null = null;
+    let iframe: HTMLIFrameElement | null = null;
 
     try {
       await loadHtml2Pdf();
 
-      // Parse the self-contained HTML to extract body content + fonts link
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(generatedHtml, "text/html");
+      // Render the self-contained HTML inside an isolated, offscreen iframe.
+      // This is the key fix for the "blank PDF" bug: the old approach placed the
+      // content behind the live app (position:fixed; z-index:-9999), so
+      // html2canvas rasterized the app UI on top of it and produced blank pages.
+      // An iframe document contains ONLY the PDF markup, so nothing can overlap
+      // it, and it also shields us from the app's Tailwind oklch() colors that
+      // html2canvas cannot parse.
+      iframe = document.createElement("iframe");
+      iframe.setAttribute("aria-hidden", "true");
+      iframe.style.cssText =
+        "position:fixed;left:0;top:0;width:794px;height:1123px;border:0;opacity:0;pointer-events:none;z-index:-1;";
+      document.body.appendChild(iframe);
 
-      // Inject Google Fonts into main doc so html2canvas can find them
-      doc.querySelectorAll('link[rel="stylesheet"]').forEach((el) => {
-        const href = (el as HTMLLinkElement).href;
-        if (!document.querySelector(`link[href="${href}"]`)) {
-          const link = document.createElement("link");
-          link.rel = "stylesheet";
-          link.href = href;
-          document.head.appendChild(link);
-        }
-      });
+      const idoc = iframe.contentDocument;
+      if (!idoc) throw new Error("PDF render frame banane mein masla");
+      idoc.open();
+      idoc.write(generatedHtml);
+      idoc.close();
 
-      // Inject scoped PDF styles (scoped to container ID, won't leak into main app)
-      const styleId = "pdf-dl-styles";
-      if (!document.getElementById(styleId)) {
-        const style = document.createElement("style");
-        style.id = styleId;
-        style.textContent = buildPdfCss(`#${CONTAINER_ID}`);
-        document.head.appendChild(style);
-      }
-
-      // Create render container — position:fixed so html2canvas sees real layout;
-      // z-index:-9999 keeps it behind the UI; opacity stays at 1 so canvas renders correctly
-      container = document.createElement("div");
-      container.id = CONTAINER_ID;
-      container.style.cssText =
-        "position:fixed;top:0;left:0;width:794px;z-index:-9999;pointer-events:none;";
-      container.innerHTML = doc.body.innerHTML;
-      document.body.appendChild(container);
-
-      // Wait for fonts to download
+      // Let layout + webfonts settle so Urdu/Arabic glyphs render (not boxes).
       await new Promise((r) => setTimeout(r, 2500));
-      await document.fonts.ready;
+      try { await idoc.fonts.ready; } catch { /* fonts API unavailable — ignore */ }
+
+      // Size the frame to the full content height so nothing gets clipped.
+      const body = idoc.body;
+      iframe.style.height = `${body.scrollHeight}px`;
 
       const surahShort = meta.surah.split(" ")[0] ?? "Surah";
       const filename = `Sabaq_${meta.lesson}_${surahShort}.pdf`;
@@ -729,11 +718,13 @@ export default function TranscriptToPdf() {
             useCORS: true,
             letterRendering: true,
             logging: false,
+            backgroundColor: "#ffffff",
+            windowWidth: 794,
           },
           jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
           pagebreak: { mode: ["css", "legacy"] },
         })
-        .from(container)
+        .from(body)
         .save();
 
       setStatus("done");
@@ -742,8 +733,8 @@ export default function TranscriptToPdf() {
       setStatus("error");
       setErrorMsg(`PDF download mein masla: ${(err as Error).message}`);
     } finally {
-      if (container && document.body.contains(container)) {
-        document.body.removeChild(container);
+      if (iframe && document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
       }
     }
   }
