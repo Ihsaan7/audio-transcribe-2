@@ -58,7 +58,9 @@ const COVER_THEMES: [string, string][] = [
 
 const SYSTEM_PROMPT = `You are an Islamic tafseer lecture formatter. You will receive a raw Urdu speech-to-text transcript of a Quran tafseer lecture along with lesson metadata.
 
-Your job: Clean up the transcript (fix speech-to-text errors, remove filler phrases, correct broken sentences without changing meaning) and structure the ENTIRE content into a JSON object matching the exact schema below. Do NOT summarize — include ALL points from the transcript in order.
+Your job: Clean up the transcript (fix speech-to-text errors, remove filler phrases, correct broken sentences without changing meaning) and structure the ENTIRE content into a JSON object matching the exact schema below.
+
+CRITICAL — COMPLETENESS: Do NOT summarize, shorten, condense, or paraphrase to save space. Reproduce EVERYTHING from the transcript in cleaned Urdu, in the original order. Every sentence, point, example, story, digression, question, and repetition in the source MUST appear in a block. It is far better to output many "body" blocks than to merge or drop content. The output should be roughly as long as (or longer than) the transcript itself — never a fraction of it.
 
 Respond with valid JSON only. No markdown fences, no preamble, no explanation.
 
@@ -92,6 +94,9 @@ RULES:
 - Do NOT translate Arabic to Urdu when the original is Arabic — preserve both
 - Extract as many sections as exist in the transcript in the correct order
 - Each section can have multiple blocks — use the block types that fit the content
+- Split long explanations into multiple "body" blocks instead of compressing them into one short paragraph
+- Never drop content because it seems minor, repetitive, or off-topic — include it
+- The transcript may be delivered in multiple parts. Process ONLY the text given in the current part; do not invent or carry over content from other parts
 - If the transcript mentions an ayah, always create a "quran" block with all 3 fields
 - If the transcript mentions a hadith, always create a "hadith" block
 - fiqh items and fawaid should be complete sentences, not fragments
@@ -124,6 +129,78 @@ function parseUrduNum(s: string): number {
     String(d.charCodeAt(0) - 0x06f0),
   );
   return parseInt(ascii, 10) || 0;
+}
+
+// ─── Gemini response parsing ─────────────────────────────────────────────────
+
+class GeminiParseError extends Error {
+  raw: string;
+  constructor(raw: string) {
+    super("Gemini ne invalid response bheja — dobara try karein");
+    this.name = "GeminiParseError";
+    this.raw = raw;
+  }
+}
+
+// Extract the first balanced {...} block — Gemini sometimes appends stray text
+// or duplicate fragments after the closing brace.
+function extractJson(s: string): string {
+  const start = s.indexOf("{");
+  if (start === -1) return s;
+  let depth = 0;
+  let inStr = false;
+  let escape = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\" && inStr) { escape = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") { depth--; if (depth === 0) return s.slice(start, i + 1); }
+  }
+  return s; // fallback: return as-is and let JSON.parse surface the real error
+}
+
+function parseGeminiJson(rawText: string): GeminiResponse {
+  const stripped = rawText
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+  try {
+    return JSON.parse(extractJson(stripped)) as GeminiResponse;
+  } catch {
+    throw new GeminiParseError(rawText);
+  }
+}
+
+// Split a long transcript into chunks on paragraph/sentence boundaries so the
+// whole thing fits within the model's output budget across multiple calls.
+// This is what guarantees the PDF covers the FULL transcript instead of a
+// truncated/summarized fragment.
+const CHUNK_CHAR_LIMIT = 9000;
+function splitTranscript(text: string, maxChars: number): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return [trimmed];
+
+  const chunks: string[] = [];
+  let cur = "";
+  const flush = () => { const t = cur.trim(); if (t) chunks.push(t); cur = ""; };
+
+  for (const para of trimmed.split(/\n\s*\n/)) {
+    if (cur && cur.length + para.length + 2 > maxChars) flush();
+    if (para.length > maxChars) {
+      for (const sent of para.split(/(?<=[۔.!?])\s+/)) {
+        if (cur && cur.length + sent.length + 1 > maxChars) flush();
+        cur += (cur ? " " : "") + sent;
+      }
+    } else {
+      cur += (cur ? "\n\n" : "") + para;
+    }
+  }
+  flush();
+  return chunks.length ? chunks : [trimmed];
 }
 
 function loadHtml2Pdf(): Promise<void> {
@@ -448,115 +525,145 @@ export default function TranscriptToPdf() {
     setRawError("");
     setGeneratedHtml("");
 
-    const userMsg = `LESSON METADATA:
+    const metaBlock = `LESSON METADATA:
 - Surah: ${meta.surah}
 - Para: ${meta.para}
 - Lesson: ${meta.lesson}
 - Ayaat: ${meta.ayaat}
 - Speaker: ${meta.speaker}
 - Institute: ${meta.institute}
-- Provided topics list: ${meta.topics}
+- Provided topics list: ${meta.topics}`;
 
-TRANSCRIPT:
-${transcript}`;
+    // Long transcripts are processed in multiple passes and merged, so the PDF
+    // always covers the ENTIRE transcript instead of a truncated fragment.
+    const chunks = splitTranscript(transcript, CHUNK_CHAR_LIMIT);
 
-    let rawText = "";
     try {
-      const url = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`);
-      url.searchParams.set("key", apiKey.trim());
+      let merged: GeminiResponse | null = null;
 
-      const res = await fetch(url.toString(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents: [{ role: "user", parts: [{ text: userMsg }] }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            maxOutputTokens: 65536,   // ensure full transcript is covered, not just part 1
-          },
-        }),
-      });
+      for (let i = 0; i < chunks.length; i++) {
+        const part = chunks.length > 1 ? ` (hissa ${i + 1}/${chunks.length})` : "";
+        setStatus("sending");
+        setStatusMsg(`Gemini ko bhaij raha hai...${part}`);
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const msg: string = errData?.error?.message ?? res.statusText;
-        const status = res.status;
-        // 404 → model name wrong or retired
-        if (status === 404) {
-          throw new Error(`Model unavailable or retired — check the model name in the dropdown. Google error: ${msg}`);
+        const partNote =
+          chunks.length > 1
+            ? `\n\nNOTE: Yeh poore transcript ka hissa ${i + 1} of ${chunks.length} hai. Sirf isi hisse ka content process karein aur ismein se kuch bhi na choReein. ${
+                i === 0
+                  ? "cover_title aur topics_summary poore lecture ke liye set karein."
+                  : 'cover_title ko "" (khali) aur topics_summary ko [] (khali) rakhein.'
+              } fawaid sirf isi hisse ke likhein. conclusion_dua sirf tab bharein jab isi hisse ke aakhir mein dua mojood ho, warna "".`
+            : "";
+
+        const userMsg = `${metaBlock}\n\nTRANSCRIPT:\n${chunks[i]}${partNote}`;
+
+        const parsed = await callGemini(userMsg);
+
+        setStatus("structuring");
+        setStatusMsg(`Content structure kar raha hai...${part}`);
+
+        if (!merged) {
+          merged = parsed;
+        } else {
+          merged.sections = [...(merged.sections ?? []), ...(parsed.sections ?? [])];
+          merged.fawaid = [...(merged.fawaid ?? []), ...(parsed.fawaid ?? [])];
+          if (!merged.cover_title && parsed.cover_title) merged.cover_title = parsed.cover_title;
+          if (!merged.topics_summary?.length && parsed.topics_summary?.length) {
+            merged.topics_summary = parsed.topics_summary;
+          }
+          if (parsed.conclusion_dua) merged.conclusion_dua = parsed.conclusion_dua;
         }
-        // 429 with limit:0 → model retired / project has zero quota
-        if (status === 429 && msg.includes("limit: 0")) {
-          throw new Error(`Model unavailable or retired — check the model name in the dropdown. Google error: ${msg}`);
-        }
-        throw new Error(`Gemini error ${status}: ${msg}`);
       }
 
-      const json = await res.json();
-      rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-
-      setStatus("structuring");
-      setStatusMsg("Content structure kar raha hai...");
-    } catch (err) {
-      if ((err as Error).message?.includes("fetch")) {
+      if (!merged) {
         setStatus("error");
+        setErrorMsg("Gemini se koi content nahi mila — dobara try karein");
+        return;
+      }
+
+      // Build HTML
+      setStatusMsg("PDF bana raha hai...");
+      const lessonNum = parseUrduNum(meta.lesson);
+      const [from, to] = COVER_THEMES[lessonNum % COVER_THEMES.length];
+      const gradient = `linear-gradient(135deg, ${from}, ${to})`;
+
+      const html = buildFullHtml(merged, meta, gradient);
+      setGeneratedHtml(html);
+      setStatus("done");
+      setStatusMsg("Tayaar! ✓");
+    } catch (err) {
+      const e = err as Error & { raw?: string };
+      setStatus("error");
+      if (e instanceof GeminiParseError) {
+        setErrorMsg(e.message);
+        setRawError(e.raw);
+      } else if (e.message?.toLowerCase().includes("fetch")) {
         setErrorMsg("Network problem — internet connection check karein");
       } else {
-        setStatus("error");
-        setErrorMsg((err as Error).message || "Koi error aa gaya");
+        setErrorMsg(e.message || "Koi error aa gaya");
       }
-      return;
+    }
+  }
+
+  // Single Gemini generateContent call → parsed JSON. Throws on HTTP, truncation
+  // (MAX_TOKENS) or parse errors so the caller can surface a clear message.
+  async function callGemini(userMsg: string): Promise<GeminiResponse> {
+    const url = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`);
+    url.searchParams.set("key", apiKey.trim());
+
+    const generationConfig: Record<string, unknown> = {
+      responseMimeType: "application/json",
+      maxOutputTokens: 65536,
+      temperature: 0.2,
+    };
+    // Gemini 2.5 models spend part of the output-token budget on hidden
+    // "thinking", which starves the JSON and makes the PDF come out short or
+    // truncated. Disable thinking so the whole budget goes to actual content.
+    // (Only 2.5 models accept thinkingConfig; older models would 400 on it.)
+    if (model.includes("2.5")) {
+      generationConfig.thinkingConfig = { thinkingBudget: 0 };
     }
 
-    // Parse JSON
-    let parsed: GeminiResponse;
-    try {
-      // Strip optional markdown code-fence wrapper
-      const stripped = rawText
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/```\s*$/i, "")
-        .trim();
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: "user", parts: [{ text: userMsg }] }],
+        generationConfig,
+      }),
+    });
 
-      // Extract the first balanced {...} block — Gemini sometimes appends
-      // stray text or duplicate fragments after the closing brace.
-      const extractJson = (s: string): string => {
-        const start = s.indexOf("{");
-        if (start === -1) return s;
-        let depth = 0;
-        let inStr = false;
-        let escape = false;
-        for (let i = start; i < s.length; i++) {
-          const ch = s[i];
-          if (escape) { escape = false; continue; }
-          if (ch === "\\" && inStr) { escape = true; continue; }
-          if (ch === '"') { inStr = !inStr; continue; }
-          if (inStr) continue;
-          if (ch === "{") depth++;
-          else if (ch === "}") { depth--; if (depth === 0) return s.slice(start, i + 1); }
-        }
-        return s; // fallback: return as-is and let JSON.parse surface the real error
-      };
-
-      parsed = JSON.parse(extractJson(stripped)) as GeminiResponse;
-    } catch {
-      setStatus("error");
-      setErrorMsg("Gemini ne invalid response bheja — dobara try karein");
-      setRawError(rawText);
-      return;
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      const msg: string = errData?.error?.message ?? res.statusText;
+      const status = res.status;
+      // 404 → model name wrong or retired
+      if (status === 404) {
+        throw new Error(`Model unavailable or retired — check the model name in the dropdown. Google error: ${msg}`);
+      }
+      // 429 with limit:0 → model retired / project has zero quota
+      if (status === 429 && msg.includes("limit: 0")) {
+        throw new Error(`Model unavailable or retired — check the model name in the dropdown. Google error: ${msg}`);
+      }
+      throw new Error(`Gemini error ${status}: ${msg}`);
     }
 
-    // Build HTML
-    setStatusMsg("PDF bana raha hai...");
-    const lessonNum = parseUrduNum(meta.lesson);
-    const [from, to] = COVER_THEMES[lessonNum % COVER_THEMES.length];
-    const gradient = `linear-gradient(135deg, ${from}, ${to})`;
+    const json = await res.json();
+    const cand = json?.candidates?.[0];
+    const rawText: string = (cand?.content?.parts ?? [])
+      .map((p: { text?: string }) => p?.text ?? "")
+      .join("");
 
-    const html = buildFullHtml(parsed, meta, gradient);
-    setGeneratedHtml(html);
-    setStatus("done");
-    setStatusMsg("Tayaar! ✓");
+    // finishReason MAX_TOKENS means Gemini ran out of room mid-answer — the
+    // content is incomplete, so tell the user instead of shipping a short PDF.
+    if (cand?.finishReason === "MAX_TOKENS") {
+      throw new Error(
+        "Gemini output apni token limit tak pahunch gaya aur content adhoora reh gaya. Transcript ko thoRe chhote hisson mein baant kar dobara try karein.",
+      );
+    }
+
+    return parseGeminiJson(rawText);
   }
 
   async function downloadPdf() {
