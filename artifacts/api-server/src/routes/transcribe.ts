@@ -42,7 +42,7 @@ router.post(
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${apiKey}`,
+          Authorization: 'Bearer ' + apiKey,
           },
           body: forwardForm,
         },
