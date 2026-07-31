@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import * as multer from "multer";
+import multer from "multer";
 
 // This is the Vercel Serverless Function equivalent of
 // `artifacts/api-server/src/routes/transcribe.ts` (the Express route used

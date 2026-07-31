@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import * as multer from "multer";
+import multer from "multer";
 import { logger } from "../lib/logger";
 
 const upload = multer({
