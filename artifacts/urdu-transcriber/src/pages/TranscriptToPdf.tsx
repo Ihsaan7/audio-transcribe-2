@@ -203,17 +203,6 @@ function splitTranscript(text: string, maxChars: number): string[] {
   return chunks.length ? chunks : [trimmed];
 }
 
-function loadHtml2Pdf(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if ((window as any).html2pdf) { resolve(); return; }
-    const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("html2pdf.js load nahi hua"));
-    document.head.appendChild(s);
-  });
-}
-
 // ─── PDF CSS ─────────────────────────────────────────────────────────────────
 
 function buildPdfCss(scope = ""): string {
@@ -223,6 +212,7 @@ function buildPdfCss(scope = ""): string {
 ${root} {
   direction:rtl; background:#fdf6e3; color:#2c1a0e;
   font-family:'Noto Nastaliq Urdu',serif; font-size:15.5px; line-height:2.3;
+  -webkit-print-color-adjust:exact; print-color-adjust:exact;
 }
 ${p}* { box-sizing:border-box; margin:0; padding:0; }
 ${p}.page { width:210mm; min-height:297mm; padding:18mm 16mm 16mm 16mm; page-break-after:always; position:relative; overflow:hidden; }
@@ -420,6 +410,7 @@ function buildFullHtml(data: GeminiResponse, meta: Metadata, gradient: string): 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&family=Amiri:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>@page { size: A4; margin: 0; }</style>
 <style>${buildPdfCss()}</style>
 </head>
 <body>
@@ -670,26 +661,27 @@ export default function TranscriptToPdf() {
     if (!generatedHtml) return;
 
     setStatus("building");
-    setStatusMsg("PDF bana raha hai...");
+    setStatusMsg("Print dialog khul raha hai...");
 
-    let iframe: HTMLIFrameElement | null = null;
+    // We hand the EXACT same self-contained HTML that the (correct-looking)
+    // preview uses to the browser's own print engine. The browser renders RTL
+    // Urdu, the Nastaliq/Amiri webfonts, the coloured blocks and A4 pagination
+    // faithfully — html2canvas could not (it dropped the stylesheet and mangled
+    // the layout). In the print dialog the user picks "Save as PDF".
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.cssText =
+      "position:fixed;right:0;bottom:0;width:210mm;height:297mm;border:0;opacity:0;pointer-events:none;";
+    document.body.appendChild(iframe);
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (document.body.contains(iframe)) document.body.removeChild(iframe);
+    };
 
     try {
-      await loadHtml2Pdf();
-
-      // Render the self-contained HTML inside an isolated, offscreen iframe.
-      // This is the key fix for the "blank PDF" bug: the old approach placed the
-      // content behind the live app (position:fixed; z-index:-9999), so
-      // html2canvas rasterized the app UI on top of it and produced blank pages.
-      // An iframe document contains ONLY the PDF markup, so nothing can overlap
-      // it, and it also shields us from the app's Tailwind oklch() colors that
-      // html2canvas cannot parse.
-      iframe = document.createElement("iframe");
-      iframe.setAttribute("aria-hidden", "true");
-      iframe.style.cssText =
-        "position:fixed;left:0;top:0;width:794px;height:1123px;border:0;opacity:0;pointer-events:none;z-index:-1;";
-      document.body.appendChild(iframe);
-
       const idoc = iframe.contentDocument;
       if (!idoc) throw new Error("PDF render frame banane mein masla");
       idoc.open();
@@ -697,45 +689,26 @@ export default function TranscriptToPdf() {
       idoc.close();
 
       // Let layout + webfonts settle so Urdu/Arabic glyphs render (not boxes).
-      await new Promise((r) => setTimeout(r, 2500));
+      await new Promise((r) => setTimeout(r, 1500));
       try { await idoc.fonts.ready; } catch { /* fonts API unavailable — ignore */ }
 
-      // Size the frame to the full content height so nothing gets clipped.
-      const body = idoc.body;
-      iframe.style.height = `${body.scrollHeight}px`;
+      const win = iframe.contentWindow;
+      if (!win) throw new Error("Print window nahi mila");
 
-      const surahShort = meta.surah.split(" ")[0] ?? "Surah";
-      const filename = `Sabaq_${meta.lesson}_${surahShort}.pdf`;
+      // Remove the frame once the print/save flow is done.
+      win.onafterprint = cleanup;
+      win.focus();
+      win.print();
 
-      await (window as any)
-        .html2pdf()
-        .set({
-          margin: 0,
-          filename,
-          image: { type: "jpeg", quality: 0.95 },
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-            letterRendering: true,
-            logging: false,
-            backgroundColor: "#ffffff",
-            windowWidth: 794,
-          },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-          pagebreak: { mode: ["css", "legacy"] },
-        })
-        .from(body)
-        .save();
+      // Fallback cleanup if onafterprint never fires (varies by browser).
+      setTimeout(cleanup, 60000);
 
       setStatus("done");
-      setStatusMsg("PDF download ho gaya ✓");
+      setStatusMsg("Print dialog mein 'Save as PDF' chunein ✓");
     } catch (err) {
+      cleanup();
       setStatus("error");
-      setErrorMsg(`PDF download mein masla: ${(err as Error).message}`);
-    } finally {
-      if (iframe && document.body.contains(iframe)) {
-        document.body.removeChild(iframe);
-      }
+      setErrorMsg(`PDF banane mein masla: ${(err as Error).message}`);
     }
   }
 
@@ -937,9 +910,9 @@ export default function TranscriptToPdf() {
               disabled={status === "building"}
             >
               {status === "building" ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Bana raha hai...</>
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Print khul raha hai...</>
               ) : (
-                <><FileDown className="w-4 h-4 mr-2" /> PDF Download Karein</>
+                <><FileDown className="w-4 h-4 mr-2" /> PDF Save Karein (Print → Save as PDF)</>
               )}
             </Button>
           </div>
