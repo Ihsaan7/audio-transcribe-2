@@ -1,13 +1,15 @@
 {
-  "extends": "../tsconfig.json",
   "compilerOptions": {
-    "noEmit": false,
-    "allowImportingTsExtensions": false,
-    "module": "commonjs",
+    "target": "ES2022",
+    "module": "CommonJS",
     "moduleResolution": "node",
-    "target": "es2022",
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "noEmit": false,
+    "incremental": false,
+    "composite": false,
+    "allowImportingTsExtensions": false
   },
   "include": ["./**/*.ts"]
 }
