@@ -75,7 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: 'Bearer ' + apiKey,
         },
         body: forwardForm,
       },
